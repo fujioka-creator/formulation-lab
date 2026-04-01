@@ -5,6 +5,18 @@ import { DefaultChatTransport } from "ai";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SafetyResult } from "@/components/SafetyResult";
 import { ResearchResult } from "@/components/ResearchResult";
+import { HistorySidebar } from "@/components/HistorySidebar";
+import { ExportMenu } from "@/components/ExportMenu";
+import {
+  loadHistory,
+  saveSession,
+  deleteSession,
+  generateId,
+  extractTitle,
+  type ChatSession,
+  type SavedMessage,
+} from "@/lib/history";
+import { exportToWord, exportToExcel, exportToCSV } from "@/lib/export";
 
 const SUGGESTIONS = [
   "敏感肌向けの保湿化粧水のベース処方を設計してください",
@@ -18,6 +30,14 @@ type Provider = "gemini" | "claude";
 export default function Home() {
   const [provider, setProvider] = useState<Provider>("gemini");
   const providerRef = useRef<Provider>("gemini");
+  const [sessionId, setSessionId] = useState<string>(() => generateId());
+  const [history, setHistory] = useState<ChatSession[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+
+  // Load history on mount
+  useEffect(() => {
+    setHistory(loadHistory());
+  }, []);
 
   // Keep ref in sync
   useEffect(() => {
@@ -33,13 +53,33 @@ export default function Home() {
     []
   );
 
-  const { messages, sendMessage, status } = useChat({ transport });
+  const { messages, sendMessage, status, setMessages } = useChat({
+    id: sessionId,
+    transport,
+  });
 
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isLoading = status === "submitted" || status === "streaming";
+
+  // Auto-save when messages change
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const session: ChatSession = {
+      id: sessionId,
+      title: extractTitle(messages as unknown as SavedMessage[]),
+      messages: messages as unknown as SavedMessage[],
+      provider,
+      createdAt:
+        history.find((h) => h.id === sessionId)?.createdAt ||
+        new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    saveSession(session);
+    setHistory(loadHistory());
+  }, [messages, sessionId, provider]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -67,6 +107,43 @@ export default function Home() {
     }
   };
 
+  const handleNewChat = () => {
+    const newId = generateId();
+    setSessionId(newId);
+    setMessages([]);
+    setShowHistory(false);
+  };
+
+  const handleSelectSession = (session: ChatSession) => {
+    setSessionId(session.id);
+    setMessages(session.messages as Parameters<typeof setMessages>[0]);
+    setProvider(session.provider as Provider);
+    setShowHistory(false);
+  };
+
+  const handleDeleteSession = (id: string) => {
+    deleteSession(id);
+    setHistory(loadHistory());
+    if (id === sessionId) {
+      handleNewChat();
+    }
+  };
+
+  const handleExportWord = () => {
+    const title = extractTitle(messages as unknown as SavedMessage[]);
+    exportToWord(title, messages as unknown as SavedMessage[]);
+  };
+
+  const handleExportExcel = () => {
+    const title = extractTitle(messages as unknown as SavedMessage[]);
+    exportToExcel(title, messages as unknown as SavedMessage[]);
+  };
+
+  const handleExportText = () => {
+    const title = extractTitle(messages as unknown as SavedMessage[]);
+    exportToCSV(title, messages as unknown as SavedMessage[]);
+  };
+
   const renderMessageParts = (message: (typeof messages)[number]) => {
     return message.parts.map((part, i) => {
       if (part.type === "text") {
@@ -76,7 +153,6 @@ export default function Home() {
           </span>
         );
       }
-      // Tool parts in AI SDK v6 have type "tool-<toolName>"
       if (part.type.startsWith("tool-")) {
         const toolPart = part as {
           type: string;
@@ -157,13 +233,44 @@ export default function Home() {
 
   return (
     <div className="flex flex-col h-dvh bg-stone-50">
+      {/* History Sidebar */}
+      {showHistory && (
+        <HistorySidebar
+          sessions={history}
+          currentId={sessionId}
+          onSelect={handleSelectSession}
+          onDelete={handleDeleteSession}
+          onNew={handleNewChat}
+          onClose={() => setShowHistory(false)}
+        />
+      )}
+
       {/* Header */}
       <header className="border-b border-stone-200 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-stone-900 flex items-center justify-center">
-              <span className="text-white text-xs font-medium">FL</span>
-            </div>
+            {/* History Button */}
+            <button
+              onClick={() => setShowHistory(true)}
+              className="p-2 rounded-lg hover:bg-stone-100 text-stone-500 transition-colors"
+              title="履歴"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+
             <div>
               <h1 className="text-base font-semibold text-stone-900 tracking-tight">
                 Formulation Lab
@@ -174,8 +281,38 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Model Toggle */}
           <div className="flex items-center gap-2">
+            {/* Export */}
+            {messages.length > 0 && (
+              <ExportMenu
+                onExportWord={handleExportWord}
+                onExportExcel={handleExportExcel}
+                onExportText={handleExportText}
+              />
+            )}
+
+            {/* New Chat */}
+            <button
+              onClick={handleNewChat}
+              className="p-2 rounded-lg hover:bg-stone-100 text-stone-500 transition-colors"
+              title="新しい相談"
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+
+            {/* Model Toggle */}
             <button
               onClick={() => setProvider("gemini")}
               disabled={isLoading}
@@ -326,7 +463,7 @@ export default function Home() {
           </div>
           <p className="text-center text-xs text-stone-400 mt-2">
             {provider === "gemini" ? "Gemini" : "Claude"} +
-            CosmeCheck連携の安全性チェック
+            CosmeCheck連携 | 自動保存
           </p>
         </div>
       </footer>
