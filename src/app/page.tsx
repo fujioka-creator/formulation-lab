@@ -5,6 +5,7 @@ import { DefaultChatTransport } from "ai";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { SafetyResult } from "@/components/SafetyResult";
 import { ResearchResult } from "@/components/ResearchResult";
+import { RegulationResult } from "@/components/RegulationResult";
 import { HistorySidebar } from "@/components/HistorySidebar";
 import { ExportMenu } from "@/components/ExportMenu";
 import {
@@ -166,18 +167,19 @@ export default function Home() {
           toolPart.state === "call";
 
         if (isToolLoading) {
-          const label =
-            toolName === "researchIngredient"
-              ? "Gemini AI で成分を調査中..."
-              : "CosmeCheck で安全性を確認中...";
-          const borderColor =
-            toolName === "researchIngredient"
-              ? "border-blue-200 bg-blue-50"
-              : "border-stone-200 bg-stone-50";
-          const textColor =
-            toolName === "researchIngredient"
-              ? "text-blue-500"
-              : "text-stone-500";
+          const labelMap: Record<string, string> = {
+            researchIngredient: "Gemini AI で成分を調査中...",
+            checkRegulation: "規制チェッカーで規制を調査中...",
+            checkSafety: "CosmeCheck で安全性を確認中...",
+          };
+          const colorMap: Record<string, [string, string]> = {
+            researchIngredient: ["border-blue-200 bg-blue-50", "text-blue-500"],
+            checkRegulation: ["border-violet-200 bg-violet-50", "text-violet-500"],
+            checkSafety: ["border-stone-200 bg-stone-50", "text-stone-500"],
+          };
+          const label = labelMap[toolName] || "処理中...";
+          const borderColor = (colorMap[toolName] || colorMap.checkSafety)[0];
+          const textColor = (colorMap[toolName] || colorMap.checkSafety)[1];
 
           return (
             <div
@@ -203,6 +205,19 @@ export default function Home() {
         }
 
         if (toolPart.state === "output-available" && toolPart.output) {
+          if (toolName === "checkRegulation") {
+            return (
+              <div key={i} className="my-3">
+                <RegulationResult
+                  data={
+                    toolPart.output as Parameters<
+                      typeof RegulationResult
+                    >[0]["data"]
+                  }
+                />
+              </div>
+            );
+          }
           if (toolName === "researchIngredient") {
             return (
               <div key={i} className="my-3">

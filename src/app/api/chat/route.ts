@@ -66,6 +66,84 @@ export async function POST(req: Request) {
         },
       }),
 
+      checkRegulation: tool({
+        description:
+          "化粧品規制チェッカーと連携して、特定の国における化粧品の規制・レギュレーションを調査します。輸出先の国の規制、成分規制、ラベリング要件、届出制度などを確認できます。処方の海外展開や輸出が話題になったら使ってください。",
+        inputSchema: z.object({
+          country: z
+            .string()
+            .describe("対象国名。例: 台湾, 中国, EU, アメリカ, 韓国, タイ"),
+          itemType: z
+            .string()
+            .describe(
+              "製品アイテム。例: 化粧水, クリーム, 日焼け止め, 美容液, シャンプー"
+            ),
+          formulation: z
+            .string()
+            .optional()
+            .describe(
+              "処方の成分リスト（任意）。例: 精製水 80%, グリセリン 5%, BG 3%..."
+            ),
+        }),
+        execute: async ({ country, itemType, formulation }) => {
+          const gemini = getGeminiDirect();
+          if (!gemini) {
+            return {
+              error: "GOOGLE_GENERATIVE_AI_API_KEY が設定されていません",
+            };
+          }
+
+          try {
+            const systemPrompt = `あなたは化粧品の国際規制に精通した専門家です。各国の化粧品規制、成分規制、ラベリング要件、届出・登録制度について正確な情報を提供します。
+
+回答は以下の構成で記載してください：
+
+1. 規制概要（関連法令、管轄官庁）
+2. 製品分類（その国でのカテゴリー）
+3. 成分規制（禁止成分、制限成分、必須表示成分）
+4. ラベリング・表示要件（必要項目、言語要件）
+5. 届出・登録制度（手続き、必要書類、期間）
+6. 安全性評価（必要な試験・評価項目）
+7. その他の留意事項（輸入規制、動物試験禁止状況等）
+
+処方が提供された場合は追加で：
+8. 処方成分の規制チェック結果（各成分の適合性）
+9. 処方の総合評価（修正が必要な点、推奨事項）
+
+具体的な数値や法令名を含め、日本語で回答してください。`;
+
+            let prompt = `【対象国】${country}\n【製品アイテム】${itemType}\n\n`;
+            if (formulation) {
+              prompt += `【処方内容】\n${formulation}\n\n`;
+              prompt += `上記の処方について、${country}における化粧品規制を詳細にチェックしてください。`;
+            } else {
+              prompt += `${country}における${itemType}に関する化粧品規制・レギュレーションを詳細にまとめてください。`;
+            }
+
+            const result = await gemini.generateContent({
+              contents: [{ role: "user", parts: [{ text: prompt }] }],
+              systemInstruction: {
+                role: "model",
+                parts: [{ text: systemPrompt }],
+              },
+              generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+            });
+
+            return {
+              source: "Gemini AI（化粧品規制チェッカー）",
+              country,
+              itemType,
+              hasFormulation: !!formulation,
+              findings: result.response.text(),
+            };
+          } catch (error) {
+            return {
+              error: `規制チェックエラー: ${error instanceof Error ? error.message : String(error)}`,
+            };
+          }
+        },
+      }),
+
       researchIngredient: tool({
         description:
           "Gemini AIを使って化粧品成分の科学的根拠、最新研究、文献情報を調査します。成分の作用機序、臨床データ、安定性情報など、より深い技術情報が必要な場合に使ってください。",
